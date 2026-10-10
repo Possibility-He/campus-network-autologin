@@ -52,6 +52,9 @@ class Connector:
             _urls = [Connector.config['detect_captive_portal_url']]
         self.detect_captive_portal_urls = list(_urls)
         self.detect_captive_portal_url = self.detect_captive_portal_urls[0]
+        # 直连，不走系统代理：校园网门户是本地的，本机代理一关就全超时
+        self.session = requests.Session()
+        self.session.trust_env = False
         self.captive_portal = Connector.config['login_page']
         self.agent = 'pc'
         self.is_auto_login = True
@@ -85,7 +88,7 @@ class Connector:
         errors = []
         for url in self.detect_captive_portal_urls:
             try:
-                response = requests.get(url, allow_redirects=False, timeout=6)
+                response = self.session.get(url, allow_redirects=False, timeout=6)
             except requests.RequestException as e:
                 errors.append(f'{url} → {e}')
                 continue
@@ -105,6 +108,8 @@ class Connector:
         # 此时不登录 —— 网络抖动时反复 POST 会被学校判定为共享而冻结账号。
         if errors:
             print('探针均不可达：' + ' | '.join(errors[:3]))
+            print('（本程序已忽略系统代理直连。若仍失败，请确认 Wi-Fi 已连接；'
+                  '若日志里出现 127.0.0.1 端口，说明请求仍被代理拦下）')
         return None
 
     def _probe_is_normal(self, url: str, response) -> bool:
@@ -225,7 +230,7 @@ class Connector:
         login_address = self.captive_portal
         try:
             # 对校园网登录网址发送请求(执行登录操作) 并获取请求到的页面数据
-            res = requests.post(login_address, data=data, headers=Connector.agent_header[self.agent]).text
+            res = self.session.post(login_address, data=data, headers=Connector.agent_header[self.agent]).text
             # 使用pyquery初始化数据
             doc = PyQuery(res)
             # 获取登录结果状态
@@ -250,8 +255,8 @@ class Connector:
     def _local_ip(self) -> str:
         """本机在校园网里的 IP：优先读认证页里的 v46ip（最准），否则用 UDP 技巧拿出口地址。"""
         try:
-            r = requests.get(self.captive_portal, timeout=6,
-                             headers=Connector.agent_header[self.agent])
+            r = self.session.get(self.captive_portal, timeout=6,
+                                 headers=Connector.agent_header[self.agent])
             m = re.search(r"v46ip\s*=\s*'([0-9.]+)'", r.content.decode('gbk', 'replace'))
             if m:
                 return m.group(1)
@@ -303,8 +308,8 @@ class Connector:
         info(colored(f'本机 IP：{my_ip or "(未识别)"}', 'light_grey'))
 
         try:
-            r = requests.get(url, params=params, timeout=10,
-                             headers=Connector.agent_header[self.agent])
+            r = self.session.get(url, params=params, timeout=10,
+                                 headers=Connector.agent_header[self.agent])
         except requests.RequestException as e:
             error(f'登录请求出错：{e}')
             return False
@@ -334,8 +339,8 @@ class Connector:
         真实字段名，改配置时不用再猜。只在"检测到劫持"时才跑，不会频繁请求。
         """
         try:
-            r = requests.get(self.captive_portal, timeout=8,
-                             headers=Connector.agent_header[self.agent])
+            r = self.session.get(self.captive_portal, timeout=8,
+                                 headers=Connector.agent_header[self.agent])
             html = r.text or ''
             info(colored(f'门户页面 HTTP {r.status_code}，长度 {len(html)}', 'light_grey'))
             forms = re.findall(r'<form[^>]*>', html, re.I)
@@ -422,7 +427,8 @@ class Connector:
         # 欢迎
         self.print_welcome_banner()
         try:
-            code = requests.get(self.detect_captive_portal_url, allow_redirects=False).status_code
+            code = self.session.get(self.detect_captive_portal_url,
+                                allow_redirects=False, timeout=6).status_code
         except:
             error('无网络连接，请检查网络连接状态后重试')
             os.system("pause")

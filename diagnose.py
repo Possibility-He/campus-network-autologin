@@ -36,9 +36,13 @@ def show(title):
     print("=" * 64)
 
 
+_SESSION = requests.Session()
+_SESSION.trust_env = False      # 直连，不走系统代理（校园网门户是本地的）
+
+
 def fetch(url, allow_redirects=False, timeout=8):
     try:
-        return requests.get(url, allow_redirects=allow_redirects, timeout=timeout,
+        return _SESSION.get(url, allow_redirects=allow_redirects, timeout=timeout,
                             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
     except requests.RequestException as e:
         print(f"  请求失败：{url} → {e}")
