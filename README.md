@@ -157,6 +157,19 @@ python .\src\Connector.py
 首次运行会依次询问：账号 → 密码（默认不回显）→ 登录设备（选 **1 个人电脑**）→ 是否记住登录信息（选 **Y**）。
 之后启动会在 5 秒后自动读取已保存的配置，无需再输入。
 
+**首次还会让你设置一个凭据口令**（用于加密保存账号密码）：
+
+```
+请输入凭据口令（用于加密保存账号密码）：      ← 自己定一个，输入时不回显
+请再输入一次确认：
+是否把口令保存在本机（以便开机自动登录）？Y）是-默认 N）否：
+```
+
+选 **Y（回车）** → 口令用 Windows 数据保护接口加密后存本机，只有你这台电脑的当前账户能解开，
+**开机自启依旧无人值守** ✓；凭据文件本身则变成 AES-256-GCM 密文，被拷走也读不出账号密码 ✓。
+（选 N 则每次启动都要手输一次口令。忘记口令：删掉 `%USERPROFILE%\network_credentials.pkl`
+与 `network_credentials.key`，重新运行输入账号即可。）
+
 **辅助脚本**：
 
 | 文件 | 用途 |
@@ -193,6 +206,14 @@ portal_fields:             # portal_type = form 时生效（表单字段表）
   auth_type: "0"
   pageid: "1"
   # …（其余字段见文件内注释）
+
+# 凭据存储方式：
+#   passphrase（默认）= 口令加密（AES-256-GCM，PBKDF2-SHA256 派生密钥）。
+#                       口令可用 Windows 数据保护接口加密后存本机，
+#                       因此开机自启仍可无人值守；跨机器时输入一次该口令即可。
+#   dpapi             = 直接用 Windows 数据保护接口（换机器 / 换账户解不开）。
+#   plain             = 明文保存（不推荐）。
+credential_encryption: passphrase
 
 password_echo: false       # true = 密码可见输入（终端无法输入密码时启用）
 log_level: info
@@ -303,6 +324,13 @@ drcom:
 13. `password_echo` 开关：终端无法输入密码时可切换为可见输入
 14. 打包适配：日志目录跟随 exe；附 `启动-自动登录.cmd`、`诊断-portal.cmd` 与 PyInstaller 打包流程
 
+**安全性**
+
+15. **凭据加密存储**：默认改为口令加密（AES-256-GCM + PBKDF2-SHA256，30 万次迭代）；
+    口令本身用 Windows 数据保护接口加密后存本机，因此开机自启依然无人值守；
+    兼容并自动迁移早期的明文 pickle 与 DPAPI 格式。
+    加密后的文件被拷到别的电脑/账户下无法解开（实测：明文不再出现在文件字节流中）
+
 ---
 
 ## 9. 文件结构
@@ -337,8 +365,11 @@ ZHKU-Connector-baiyun/
 - 不处理：账号欠费/被冻结、需要验证码或短信二次认证、**802.1X / PPPoE 型认证**
   （那类没有 Web 认证页，本项目不适用）
 - 不含「下线/注销」功能（如需，Dr.COM 的注销路径为 `/eportal/?c=ACSetting&a=Logout&ver=1.0`）
-- 凭据以**明文 pickle** 存于 `%USERPROFILE%\network_credentials.pkl`（上游设计如此）；
-  介意可自行改为 Windows 凭据管理器 / DPAPI 加密
+- 凭据默认以**口令加密**（AES-256-GCM）存于 `%USERPROFILE%\network_credentials.pkl`；
+  口令可选保存在 `network_credentials.key`（同样经 Windows 数据保护接口加密，仅本机本账户可解）。
+  若把 `credential_encryption` 设为 `plain` 则退回明文 —— 不建议。
+  注意：**已解密的凭据在程序运行时仍存在于内存中**，且加密保护的是文件而非进程；
+  如机器本身被他人物理使用，请改用不保存凭据的方式（每次手输）
 
 ---
 
