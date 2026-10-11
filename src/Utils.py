@@ -141,6 +141,8 @@ def _encode_credentials(payload: bytes) -> bytes:
         passphrase = load_passphrase()
         if not passphrase:
             passphrase = ask_passphrase(confirm=True)
+            if not passphrase:
+                print('未设置口令，将改用系统加密（Windows 数据保护接口，仅本机本账户可解）。')
             if passphrase:
                 try:
                     ans = input('是否把口令保存在本机（以便开机自动登录）？Y）是-默认 N）否：').strip()
@@ -206,10 +208,17 @@ def upgrade_credentials_to_encrypted() -> bool:
             return False                       # 已是口令加密
         payload = _decode_credentials(raw)
         enc = _encode_credentials(payload)
-        if not enc.startswith(_ENC_MAGIC_V2):
-            return False                       # 没能用口令加密，保持原样
-        if _aes_decrypt(load_passphrase() or '', enc) != payload:
-            return False                       # 自检不通过，别动原文件
+        if enc == raw:
+            return False                       # 没有变化，无需写回
+        # 自检：按实际采用的方案解一遍，确认能解回来再覆盖原文件
+        if enc.startswith(_ENC_MAGIC_V2):
+            if _aes_decrypt(load_passphrase() or '', enc) != payload:
+                return False
+        elif enc.startswith(_ENC_MAGIC):
+            if _dpapi(False, base64.b64decode(enc[len(_ENC_MAGIC):])) != payload:
+                return False
+        else:
+            return False                       # 明文就不迁移了
         with open(network_credentials_file_path, 'wb') as f:
             f.write(enc)
         return True
